@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>逐帧动画导出模板（标准通用版）</title>
+    <style>
+        body { background: #f0f0f0; font-family: sans-serif; padding: 20px; }
+        #canvas-container { border: 1px solid #ccc; background: white; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <h3>逐帧动画导出模板（标准通用版）</h3>
+    <div id="canvas-container"></div>
+    <button id="start-btn">开始导出</button>
+    <button id="download-btn" disabled>下载 ZIP</button>
+
+    <!-- 必要库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.7.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+    <script>
+        /********************** 1️ 基础配置区（需要改） **********************/
+        const CANVAS_WIDTH = 1920;         // 画布宽度，默认不改
+        const CANVAS_HEIGHT = 1080;        // 画布高度，默认不改
+        const FRAME_RATE = 30;             // 帧率，默认不改
+        const TOTAL_DURATION = 5;          // 动画总时长（秒）
+        const TOTAL_FRAMES = Math.ceil(TOTAL_DURATION * FRAME_RATE);
+
+        /********************** 2️ 动画元素定义区（需要改） **********************/
+        // 你可以定义任意元素
+        const textObj = {
+            x: CANVAS_WIDTH / 2,
+            y: CANVAS_HEIGHT / 2,
+            fontSize: 100,
+            text: '🚀 启动！',
+            opacity: 1
+        };
+
+        /********************** 3️ 动画 timeline 定义区（需要改） **********************/
+        const timeline = gsap.timeline({ paused: true })
+            .to(textObj, { x: 1600, duration: 3, ease: 'power2.inOut' })         // 横向移动
+            .to(textObj, { fontSize: 200, duration: 2, ease: 'elastic.out' }, 1) // 字体变大
+            .to(textObj, { opacity: 0, duration: 1 }, 4);                        // 淡出
+
+        /********************** 4️ drawScene 函数（每次动画自定义） **********************/
+        const drawScene = () => {
+            // 👉 每次动画自己定义这里画什么
+            ctx.globalAlpha = textObj.opacity;
+            ctx.font = `${textObj.fontSize}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#000';
+            ctx.fillText(textObj.text, textObj.x, textObj.y);
+            ctx.globalAlpha = 1;
+        };
+
+        /********************** 5️ 核心逻辑区（无需改，通用模板） **********************/
+        // 初始化 canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+        document.getElementById('canvas-container').appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+
+        // 逐帧导出相关变量
+        let currentFrame = 0;
+        let isExporting = false;
+        const frameImages = [];
+
+        // 固定模板 drawFrame → 始终调用 drawScene
+        const drawFrame = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#fff';  // 背景色（可改透明色 'rgba(0,0,0,0)' 支持透明PNG）
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 调用自定义绘制逻辑
+            drawScene();
+        };
+
+        // 导出当前帧
+        const exportFrame = () => {
+            const progress = currentFrame / TOTAL_FRAMES;
+            timeline.progress(progress);
+            drawFrame();
+
+            const dataURL = canvas.toDataURL('image/png');
+            frameImages.push(dataURL);
+
+            currentFrame++;
+            if (currentFrame < TOTAL_FRAMES) {
+                setTimeout(exportFrame, 1000 / FRAME_RATE);
+            } else {
+                isExporting = false;
+                document.getElementById('download-btn').disabled = false;
+                console.log(`导出完成，共 ${frameImages.length} 帧`);
+            }
+        };
+
+        // 按钮绑定逻辑
+        document.getElementById('start-btn').addEventListener('click', () => {
+            if (isExporting) return;
+            isExporting = true;
+            currentFrame = 0;
+            frameImages.length = 0;
+            document.getElementById('download-btn').disabled = true;
+            exportFrame();
+        });
+
+        document.getElementById('download-btn').addEventListener('click', () => {
+            const zip = new JSZip();
+            frameImages.forEach((dataURL, index) => {
+                const base64 = dataURL.split(',')[1];
+                zip.file(`frame_${String(index).padStart(4, '0')}.png`, base64, { base64: true });
+            });
+
+            zip.generateAsync({ type: 'blob' }).then((blob) => {
+                saveAs(blob, 'frames.zip');
+                console.log('所有帧已打包下载');
+            });
+        });
+    </script>
+</body>
+</html>
