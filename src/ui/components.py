@@ -155,3 +155,131 @@ def display_error(message: str):
 def display_warning(message: str):
     """A standardized way to display warnings."""
     st.warning(message, icon="⚠️")
+
+
+# --- Charting and Utility Functions ---
+import pandas as pd
+import plotly.graph_objects as go
+import asyncio
+import nest_asyncio
+
+# Apply nest_asyncio to allow running asyncio event loops within Streamlit's loop
+nest_asyncio.apply()
+
+def safe_run_async(coro):
+    """
+    Safely runs an async coroutine in a Streamlit environment.
+    Handles the "cannot run loop while another loop is running" error
+    by leveraging the existing event loop if one is present.
+    """
+    try:
+        # Check if an event loop is already running
+        loop = asyncio.get_running_loop()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        # If no loop is running, create a new one
+        return asyncio.run(coro)
+    except Exception as e:
+        st.error(f"An unexpected error occurred during an async operation: {e}")
+        return None
+
+
+def validate_symbol(symbol: str) -> bool:
+    """Validates that the symbol is not empty and has a valid format (e.g., 'BTC/USDT')."""
+    if not symbol or '/' not in symbol or len(symbol.split('/')) != 2:
+        st.error("请输入有效的交易对格式，例如 'BTC/USDT'。")
+        return False
+    return True
+
+
+def create_depth_chart(order_book: dict) -> go.Figure:
+    """Creates a Plotly order book depth chart."""
+    if not order_book or 'bids' not in order_book or 'asks' not in order_book:
+        fig = go.Figure()
+        fig.update_layout(title_text="市场深度 - 无数据", height=300)
+        return fig
+
+    bids = pd.DataFrame(order_book.get('bids', []), columns=['price', 'volume']).astype(float)
+    asks = pd.DataFrame(order_book.get('asks', []), columns=['price', 'volume']).astype(float)
+
+    bids = bids.sort_values('price', ascending=False)
+    asks = asks.sort_values('price', ascending=True)
+
+    bids['cumulative'] = bids['volume'].cumsum()
+    asks['cumulative'] = asks['volume'].cumsum()
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=bids['price'], y=bids['cumulative'], name='买单', fill='tozeroy', line_color='green'))
+    fig.add_trace(go.Scatter(x=asks['price'], y=asks['cumulative'], name='卖单', fill='tozeroy', line_color='red'))
+
+    fig.update_layout(
+        title_text=f"{order_book.get('symbol', '')} 市场深度",
+        xaxis_title="价格",
+        yaxis_title="累计数量",
+        height=300,
+        margin=dict(l=20, r=20, t=40, b=20),
+        template="plotly_white"
+    )
+    return fig
+
+
+def create_candlestick_chart(df: pd.DataFrame, symbol: str, show_volume: bool = True, ma_periods: list = None) -> go.Figure:
+    """Creates a Plotly candlestick chart from OHLCV data with optional indicators."""
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title_text=f"{symbol} K线图 - 无数据", height=400)
+        return fig
+
+    required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+    if not all(col in df.columns for col in required_cols):
+        display_error(f"K线图数据格式错误，缺少以下列: {', '.join(set(required_cols) - set(df.columns))}")
+        return go.Figure()
+
+    if 'datetime' not in df.columns:
+        df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
+
+    fig = go.Figure(data=[go.Candlestick(
+        x=df['datetime'],
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        name=symbol
+    )])
+
+    if ma_periods:
+        colors = ['orange', 'purple', 'blue', 'red', 'cyan', 'magenta']
+        for i, period in enumerate(ma_periods):
+            if len(df) >= period:
+                ma = df['close'].rolling(window=period).mean()
+                fig.add_trace(go.Scatter(
+                    x=df['datetime'], y=ma, mode='lines', name=f'MA{period}',
+                    line=dict(color=colors[i % len(colors)], width=1.5)
+                ))
+
+    fig.update_layout(
+        title_text=f"{symbol} K线图",
+        xaxis_title="时间",
+        yaxis_title="价格",
+        height=600 if show_volume else 500,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis_rangeslider_visible=False,
+        showlegend=True,
+        template="plotly_white"
+    )
+
+    if show_volume:
+        fig.update_layout(
+            yaxis2=dict(title="成交量", overlaying='y', side='right', showgrid=False),
+            shapes=[
+                dict(type='rect', xref='paper', yref='paper', x0=0, y0=0, x1=1, y1=1,
+                     line=dict(color='rgba(0,0,0,0)'), fillcolor='rgba(0,0,0,0)'),
+            ],
+            yaxis=dict(domain=[0.3, 1]),
+            yaxis2=dict(domain=[0, 0.25])
+        )
+        fig.add_trace(go.Bar(
+            x=df['datetime'], y=df['volume'], name='成交量', yaxis='y2', opacity=0.4, marker_color='grey'
+        ))
+
+    return fig
